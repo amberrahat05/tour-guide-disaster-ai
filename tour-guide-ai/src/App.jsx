@@ -60,7 +60,7 @@ function App() {
             <Navigation size={21} />
           </div>
 
-          <span>Safar<span className="logo-highlight">AI</span></span>
+          <span>Safar<span className="logo-highlight"></span></span>
         </div>
 
         <div className="nav-links">
@@ -83,10 +83,7 @@ function App() {
 
         <div className="hero-content">
 
-          <div className="hero-badge">
-            <Sparkles size={16} />
-            AI POWERED TRAVEL SAFETY
-          </div>
+
 
           <h1>
             Explore More.
