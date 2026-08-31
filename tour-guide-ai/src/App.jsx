@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";;
 import {
   MapPin,
   CalendarDays,
@@ -21,8 +21,213 @@ import {
   Search,
   ChevronRight,
 } from "lucide-react";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+  useMap,
+} from "react-leaflet";
+
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 import "./App.css";
+function RouteMap({ from, to, routeType }) {
+  const [locations, setLocations] = useState(null);
+  const [routes, setRoutes] = useState([]);
+  const [error, setError] = useState("");
+  const [selectedRoute, setSelectedRoute] = useState("safest");
+
+  useEffect(() => {
+    const getRoute = async () => {
+      try {
+        setError("");
+
+        // Geocode starting location
+        const fromResponse = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            from + ", India"
+          )}&limit=1`
+        );
+
+        const fromData = await fromResponse.json();
+
+        // Geocode destination
+        const toResponse = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            to + ", India"
+          )}&limit=1`
+        );
+
+        const toData = await toResponse.json();
+
+        if (!fromData.length || !toData.length) {
+          setError("Could not find one of the locations.");
+          return;
+        }
+
+        const start = {
+          lat: Number(fromData[0].lat),
+          lon: Number(fromData[0].lon),
+        };
+
+        const destination = {
+          lat: Number(toData[0].lat),
+          lon: Number(toData[0].lon),
+        };
+
+        setLocations({
+          start,
+          destination,
+        });
+
+        // Get actual road route
+        const routeResponse = await fetch(
+          `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${destination.lon},${destination.lat}?overview=full&geometries=geojson&alternatives=true`
+        );
+
+        const routeData = await routeResponse.json();
+
+        if (
+          routeData.routes &&
+          routeData.routes.length > 0
+        ) {
+          const allRoutes = routeData.routes.map((route) =>
+            route.geometry.coordinates.map(
+              ([lon, lat]) => [lat, lon]
+            )
+          );
+
+          setRoutes(allRoutes);
+        }
+      } catch (err) {
+        console.error("Map error:", err);
+        setError("Unable to load route.");
+      }
+    };
+
+    if (from && to) {
+      getRoute();
+    }
+  }, [from, to]);
+
+  if (error) {
+    return (
+      <div className="map-error">
+        <MapPin size={25} />
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  if (!locations) {
+    return (
+      <div className="map-loading">
+        <Navigation size={25} />
+        <p>Finding your route...</p>
+      </div>
+    );
+  }
+
+  const startPosition = [
+    locations.start.lat,
+    locations.start.lon,
+  ];
+
+  const destinationPosition = [
+    locations.destination.lat,
+    locations.destination.lon,
+  ];
+
+  return (
+    <MapContainer
+      center={startPosition}
+      zoom={6}
+      scrollWheelZoom={true}
+      className="real-map"
+    >
+      <TileLayer
+        attribution='&copy; OpenStreetMap contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+
+      <Marker position={startPosition}>
+        <Popup>
+          <strong>Starting Point</strong>
+          <br />
+          {from}
+        </Popup>
+      </Marker>
+
+      <Marker position={destinationPosition}>
+        <Popup>
+          <strong>Destination</strong>
+          <br />
+          {to}
+        </Popup>
+      </Marker>
+
+      {routes.length > 0 && (
+        <>
+          {routes.map((route, index) => (
+            <Polyline
+              key={index}
+              positions={route}
+              pathOptions={{
+                weight: 4,
+                opacity: 0.35,
+              }}
+            />
+          ))}
+
+          {routes[0] && (
+            <Polyline
+              positions={
+                routes[
+                routeType === "shortest"
+                  ? 0
+                  : routeType === "cheapest"
+                    ? Math.min(1, routes.length - 1)
+                    : routeType === "safest"
+                      ? 0
+                      : Math.min(2, routes.length - 1)
+                ]
+              }
+              pathOptions={{
+                weight: 7,
+                opacity: 1,
+              }}
+            />
+          )}
+        </>
+      )}
+
+      <MapBounds
+        start={startPosition}
+        destination={destinationPosition}
+      />
+    </MapContainer>
+  );
+}
+
+function MapBounds({ start, destination }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const bounds = L.latLngBounds([
+      start,
+      destination,
+    ]);
+
+    map.fitBounds(bounds, {
+      padding: [50, 50],
+    });
+  }, [map, start, destination]);
+
+  return null;
+}
 
 function App() {
   const [from, setFrom] = useState("");
@@ -32,8 +237,10 @@ function App() {
   const [travelers, setTravelers] = useState(1);
   const [preference, setPreference] = useState("balanced");
   const [showResults, setShowResults] = useState(false);
+  const [riskResult, setRiskResult] = useState(null);
+  const [loadingRisk, setLoadingRisk] = useState(false);
 
-  const planTrip = (e) => {
+  const planTrip = async (e) => {
     e.preventDefault();
 
     if (!from || !to || !date || !budget) {
@@ -41,13 +248,56 @@ function App() {
       return;
     }
 
-    setShowResults(true);
+    setLoadingRisk(true);
 
-    setTimeout(() => {
-      document
-        .getElementById("results")
-        ?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    try {
+      const weatherData = {
+        temperature: 22,
+        humidity: 75,
+        rainfall: 25,
+        wind_speed: 25,
+        snowfall: 0,
+        visibility: 5,
+      };
+
+      const response = await fetch(
+        "http://127.0.0.1:5000/predict-risk",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(weatherData),
+        }
+      );
+
+      const result = await response.json();
+
+      console.log("ANN Result:", result);
+
+      if (!result.success) {
+        throw new Error(result.error || "Risk prediction failed");
+      }
+
+      setRiskResult(result);
+      setShowResults(true);
+
+      setTimeout(() => {
+        document
+          .getElementById("results")
+          ?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+
+    } catch (error) {
+      console.error("ANN connection error:", error);
+
+      alert(
+        "Unable to connect to the AI risk prediction server. Make sure Flask is running."
+      );
+
+    } finally {
+      setLoadingRisk(false);
+    }
   };
 
   return (
@@ -293,36 +543,17 @@ function App() {
           </div>
 
           {/* MAP */}
-          <div className="map-card">
+          <div className="map-card" id="route-map">
 
-            <div className="map-placeholder">
-
-              <div className="map-grid"></div>
-
-              <div className="map-route"></div>
-
-              <div className="map-marker start">
-                <MapPin size={25} />
-              </div>
-
-              <div className="map-marker destination">
-                <MapPin size={25} />
-              </div>
-
-              <div className="map-label start-label">
-                {from}
-              </div>
-
-              <div className="map-label destination-label">
-                {to}
-              </div>
-
-              <div className="map-overlay">
-                <Route size={18} />
-                Live Route Preview
-              </div>
-
+            <div className="map-overlay">
+              <Route size={18} />
+              Live Route Preview
             </div>
+            <RouteMap
+              from={from}
+              to={to}
+              routeType={selectedRoute}
+            />
 
           </div>
 
@@ -352,6 +583,9 @@ function App() {
               cost="₹6,500"
               risk="Low"
               riskClass="low"
+              routeType="shortest"
+              selectedRoute={selectedRoute}
+              onSelectRoute={setSelectedRoute}
             />
 
             <RouteCard
@@ -362,6 +596,9 @@ function App() {
               cost="₹4,800"
               risk="Medium"
               riskClass="medium"
+              routeType="cheapest"
+              selectedRoute={selectedRoute}
+              onSelectRoute={setSelectedRoute}
             />
 
             <RouteCard
@@ -372,7 +609,10 @@ function App() {
               cost="₹6,200"
               risk="Low"
               riskClass="low"
+              routeType="safest"
               recommended
+              selectedRoute={selectedRoute}
+              onSelectRoute={setSelectedRoute}
             />
 
             <RouteCard
@@ -383,12 +623,18 @@ function App() {
               cost="₹7,100"
               risk="Medium"
               riskClass="medium"
+              routeType="longest"
+              selectedRoute={selectedRoute}
+              onSelectRoute={setSelectedRoute}
             />
 
           </div>
 
           {/* AI RISK */}
-          <RiskDashboard />
+          <RiskDashboard
+            riskResult={riskResult}
+            loadingRisk={loadingRisk}
+          />
 
           {/* WEATHER */}
           <WeatherSection />
@@ -480,6 +726,9 @@ function RouteCard({
   risk,
   riskClass,
   recommended,
+  routeType,
+  selectedRoute,
+  onSelectRoute,
 }) {
 
   return (
@@ -529,8 +778,23 @@ function RouteCard({
 
       </div>
 
-      <button className="view-route">
-        View Route
+      <button
+        className={`view-route ${selectedRoute === routeType ? "active-route-button" : ""
+          }`}
+        onClick={() => {
+          onSelectRoute(routeType);
+
+          setTimeout(() => {
+            document
+              .getElementById("route-map")
+              ?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+          }, 100);
+        }}
+      >
+        {selectedRoute === routeType ? "Route Selected" : "View Route"}
         <ChevronRight size={17} />
       </button>
 
@@ -563,7 +827,7 @@ function FeatureCard({ icon, title, text }) {
 
 /* RISK DASHBOARD */
 
-function RiskDashboard() {
+function RiskDashboard({ riskResult, loadingRisk }) {
 
   return (
     <section className="risk-section" id="risk">
@@ -590,7 +854,16 @@ function RiskDashboard() {
           <div className="risk-circle">
 
             <div>
-              <strong>28</strong>
+              <strong>
+                {loadingRisk
+                  ? "..."
+                  : riskResult
+                    ? Math.round(
+                      riskResult.probabilities.high * 100
+                    )
+                    : "--"}
+              </strong>
+
               <small>/100</small>
             </div>
 
@@ -598,12 +871,28 @@ function RiskDashboard() {
 
           <div className="risk-status">
             <span>Predicted Travel Risk</span>
-            <h3>LOW RISK 🟢</h3>
 
-            <p>
-              Current weather conditions appear relatively safe
-              for your selected journey.
-            </p>
+            {loadingRisk ? (
+              <h3>ANALYZING... 🧠</h3>
+            ) : riskResult ? (
+              <>
+                <h3>
+                  {riskResult.risk_level.toUpperCase()} RISK
+                  {riskResult.risk_level === "Low"
+                    ? " 🟢"
+                    : riskResult.risk_level === "Medium"
+                      ? " 🟡"
+                      : " 🔴"}
+                </h3>
+
+                <p>
+                  Your ANN model has analyzed the current weather
+                  conditions and predicted the travel risk.
+                </p>
+              </>
+            ) : (
+              <h3>WAITING FOR PREDICTION</h3>
+            )}
           </div>
 
         </div>
