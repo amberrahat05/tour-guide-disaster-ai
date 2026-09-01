@@ -239,6 +239,7 @@ function App() {
   const [showResults, setShowResults] = useState(false);
   const [riskResult, setRiskResult] = useState(null);
   const [loadingRisk, setLoadingRisk] = useState(false);
+  const [selectedRoute, setSelectedRoute] = useState("safest");
 
   const planTrip = async (e) => {
     e.preventDefault();
