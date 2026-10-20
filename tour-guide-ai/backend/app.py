@@ -6,9 +6,9 @@ import numpy as np
 import requests
 
 
-# ==========================================
+
 # CREATE FLASK APPLICATION
-# ==========================================
+
 
 app = Flask(__name__)
 
@@ -65,6 +65,7 @@ def predict_risk():
         wind_speed = float(data["wind_speed"])
         snowfall = float(data["snowfall"])
         visibility = float(data["visibility"])
+        pressure = float(data["pressure"])
 
 
         features = np.array([[
@@ -73,7 +74,8 @@ def predict_risk():
             rainfall,
             wind_speed,
             snowfall,
-            visibility
+            visibility,
+            pressure
         ]])
 
 
